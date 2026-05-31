@@ -10,7 +10,7 @@ git config user.email "amicocaroecampus@gmail.com"
 git config user.name "Made-In-App"
 
 git add .
-git commit -m "fix: playlistsProvider ora StreamProvider reattivo — canali si caricano automaticamente dopo add/toggle/delete playlist" 2>/dev/null || echo "Nessun nuovo commit"
+git commit -m "feat: player TV-style con auto-hide, seek bar, +10/-10s, ricarica live, fix back navigation" 2>/dev/null || echo "Nessun nuovo commit"
 
 echo ""
 git push origin main
