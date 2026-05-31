@@ -5,9 +5,11 @@ import '../features/channels/channels_screen.dart';
 import '../features/epg/epg_screen.dart';
 import '../features/player/player_screen.dart';
 import '../features/vod/vod_screen.dart';
+import '../features/vod/series_detail_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/playlists/playlists_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../data/models/vod_item.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -33,6 +35,13 @@ final routerProvider = Provider<GoRouter>((ref) {
             title: extra['title'] as String? ?? '',
             channelId: extra['channelId'] as String?,
           );
+        },
+      ),
+      GoRoute(
+        path: '/series',
+        builder: (context, state) {
+          final series = state.extra as VodItem;
+          return SeriesDetailScreen(series: series);
         },
       ),
     ],

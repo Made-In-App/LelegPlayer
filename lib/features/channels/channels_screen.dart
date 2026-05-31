@@ -5,6 +5,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme.dart';
 import '../../data/models/channel.dart';
 import '../../data/models/epg_program.dart';
+import '../../data/services/epg_sync_service.dart';
+import '../../data/services/favorites_service.dart';
+import '../../shared/widgets/tv_focusable.dart';
 import '../providers/channel_provider.dart';
 
 class ChannelsScreen extends ConsumerStatefulWidget {
@@ -14,87 +17,324 @@ class ChannelsScreen extends ConsumerStatefulWidget {
   ConsumerState<ChannelsScreen> createState() => _ChannelsScreenState();
 }
 
-class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
+class _ChannelsScreenState extends ConsumerState<ChannelsScreen>
+    with SingleTickerProviderStateMixin {
   String? _selectedGroup;
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final channelsAsync = ref.watch(channelsProvider);
-    final epg = ref.watch(currentEpgProvider);
+    final epgAsync = ref.watch(epgSyncProvider);
+    final epg = epgAsync.valueOrNull ?? {};
 
-    return channelsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => _ErrorView(error: e.toString()),
-      data: (channels) {
-        final groups = channels
-            .map((c) => c.group ?? 'Senza categoria')
-            .toSet()
-            .toList()
-          ..sort();
-
-        final filtered = _selectedGroup == null
-            ? channels
-            : channels.where((c) => c.group == _selectedGroup).toList();
-
-        return Row(
-          children: [
-            // ── Sidebar gruppi ──────────────────────────────
-            if (MediaQuery.of(context).size.width > 600)
-              SizedBox(
-                width: 200,
-                child: _GroupList(
-                  groups: groups,
-                  selected: _selectedGroup,
-                  onSelect: (g) => setState(() => _selectedGroup = g),
-                ),
-              ),
-
-            // ── Lista canali ────────────────────────────────
-            Expanded(
-              child: Column(
-                children: [
-                  if (MediaQuery.of(context).size.width <= 600)
-                    _GroupDropdown(
-                      groups: groups,
-                      selected: _selectedGroup,
-                      onSelect: (g) => setState(() => _selectedGroup = g),
-                    ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (context, i) {
-                        final ch = filtered[i];
-                        final nowPlaying = epg[ch.epgId ?? ch.id]
-                            ?.where((p) => p.isNow)
-                            .firstOrNull;
-                        return _ChannelTile(
-                          channel: ch,
-                          nowPlaying: nowPlaying,
-                          onTap: () => context.go('/player', extra: {
-                            'url': ch.streamUrl,
-                            'title': ch.name,
-                            'channelId': ch.epgId ?? ch.id,
-                          }),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Live TV'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Aggiorna EPG',
+            onPressed: () => ref.read(epgSyncProvider.notifier).refresh(),
+          ),
+          if (epgAsync.isLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
             ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.live_tv), text: 'Tutti'),
+            Tab(icon: Icon(Icons.favorite), text: 'Preferiti'),
+            Tab(icon: Icon(Icons.history), text: 'Recenti'),
           ],
+        ),
+      ),
+      body: channelsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => _ErrorView(error: e.toString()),
+        data: (channels) {
+          final groups = channels
+              .map((c) => c.group ?? 'Senza categoria')
+              .toSet()
+              .toList()
+            ..sort();
+
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _AllChannelsTab(
+                channels: channels,
+                groups: groups,
+                selectedGroup: _selectedGroup,
+                onGroupSelected: (g) => setState(() => _selectedGroup = g),
+                epg: epg,
+              ),
+              _FavoritesTab(epg: epg),
+              _HistoryTab(epg: epg),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AllChannelsTab extends StatelessWidget {
+  final List<Channel> channels;
+  final List<String> groups;
+  final String? selectedGroup;
+  final ValueChanged<String?> onGroupSelected;
+  final Map<String, List<EPGProgram>> epg;
+
+  const _AllChannelsTab({
+    required this.channels,
+    required this.groups,
+    this.selectedGroup,
+    required this.onGroupSelected,
+    required this.epg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = selectedGroup == null
+        ? channels
+        : channels.where((c) => c.group == selectedGroup).toList();
+    final isWide = MediaQuery.of(context).size.width > 600;
+
+    return Row(
+      children: [
+        if (isWide)
+          SizedBox(
+            width: 180,
+            child: _GroupSidebar(
+                groups: groups,
+                selected: selectedGroup,
+                onSelect: onGroupSelected),
+          ),
+        Expanded(
+          child: Column(
+            children: [
+              if (!isWide)
+                _GroupDropdown(
+                    groups: groups,
+                    selected: selectedGroup,
+                    onSelect: onGroupSelected),
+              Expanded(child: _ChannelList(channels: filtered, epg: epg)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FavoritesTab extends ConsumerWidget {
+  final Map<String, List<EPGProgram>> epg;
+  const _FavoritesTab({required this.epg});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final favsAsync = ref.watch(favoritesProvider);
+    return favsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('$e')),
+      data: (favs) => favs.isEmpty
+          ? const Center(
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.favorite_border, size: 64, color: AppTheme.onSurface),
+                SizedBox(height: 12),
+                Text('Nessun preferito'),
+                Text('Tieni premuto su un canale per aggiungerlo',
+                    style: TextStyle(color: AppTheme.onSurface, fontSize: 12)),
+              ]),
+            )
+          : _ChannelList(channels: favs, epg: epg),
+    );
+  }
+}
+
+class _HistoryTab extends ConsumerWidget {
+  final Map<String, List<EPGProgram>> epg;
+  const _HistoryTab({required this.epg});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final histAsync = ref.watch(watchHistoryProvider);
+    return histAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('$e')),
+      data: (history) => history.isEmpty
+          ? const Center(
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.history, size: 64, color: AppTheme.onSurface),
+                SizedBox(height: 12),
+                Text('Nessun canale visto di recente'),
+              ]),
+            )
+          : Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.delete_sweep, size: 16),
+                    label: const Text('Cancella cronologia'),
+                    onPressed: () =>
+                        ref.read(watchHistoryProvider.notifier).clear(),
+                  ),
+                ),
+                Expanded(child: _ChannelList(channels: history, epg: epg)),
+              ],
+            ),
+    );
+  }
+}
+
+class _ChannelList extends ConsumerWidget {
+  final List<Channel> channels;
+  final Map<String, List<EPGProgram>> epg;
+  const _ChannelList({required this.channels, required this.epg});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListView.separated(
+      itemCount: channels.length,
+      separatorBuilder: (_, __) => const Divider(height: 1, thickness: 1),
+      itemBuilder: (context, i) {
+        final ch = channels[i];
+        final epgId = ch.epgId ?? ch.id;
+        final now = epg.nowFor(epgId);
+        final next = epg.nextFor(epgId);
+        return _ChannelTile(
+          channel: ch,
+          nowPlaying: now,
+          nextProgram: next,
+          onTap: () {
+            ref.read(watchHistoryProvider.notifier).add(ch);
+            context.go('/player', extra: {
+              'url': ch.streamUrl,
+              'title': ch.name,
+              'channelId': epgId,
+            });
+          },
+          onLongPress: () => ref.read(favoritesProvider.notifier).toggle(ch),
         );
       },
     );
   }
 }
 
-class _GroupList extends StatelessWidget {
+class _ChannelTile extends ConsumerWidget {
+  final Channel channel;
+  final EPGProgram? nowPlaying;
+  final EPGProgram? nextProgram;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  const _ChannelTile({
+    required this.channel,
+    this.nowPlaying,
+    this.nextProgram,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return TvFocusable(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      borderRadius: 0,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 52,
+              height: 52,
+              child: channel.logo != null
+                  ? CachedNetworkImage(
+                      imageUrl: channel.logo!,
+                      fit: BoxFit.contain,
+                      errorWidget: (_, __, ___) =>
+                          const Icon(Icons.tv, size: 32),
+                    )
+                  : const Icon(Icons.tv, size: 32),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(channel.name,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                      if (channel.hasCatchup)
+                        const Icon(Icons.history,
+                            size: 14, color: AppTheme.accent),
+                    ],
+                  ),
+                  if (nowPlaying != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '▶ ${nowPlaying!.title}',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppTheme.onSurface),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    LinearProgressIndicator(
+                      value: nowPlaying!.progress,
+                      backgroundColor: AppTheme.epgPast,
+                      valueColor:
+                          const AlwaysStoppedAnimation(AppTheme.accent),
+                      minHeight: 2,
+                    ),
+                    if (nextProgram != null)
+                      Text(
+                        'Dopo: ${nextProgram!.title}',
+                        style: const TextStyle(
+                            fontSize: 11, color: AppTheme.onSurface),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupSidebar extends StatelessWidget {
   final List<String> groups;
   final String? selected;
   final ValueChanged<String?> onSelect;
-
-  const _GroupList({required this.groups, this.selected, required this.onSelect});
+  const _GroupSidebar(
+      {required this.groups, this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -102,15 +342,19 @@ class _GroupList extends StatelessWidget {
       color: AppTheme.surfaceVariant,
       child: ListView(
         children: [
-          ListTile(
-            title: const Text('Tutti'),
-            selected: selected == null,
+          TvFocusable(
             onTap: () => onSelect(null),
+            child: ListTile(
+                title: const Text('Tutti'),
+                selected: selected == null,
+                dense: true),
           ),
-          ...groups.map((g) => ListTile(
-                title: Text(g, overflow: TextOverflow.ellipsis),
-                selected: selected == g,
+          ...groups.map((g) => TvFocusable(
                 onTap: () => onSelect(g),
+                child: ListTile(
+                    title: Text(g, overflow: TextOverflow.ellipsis),
+                    selected: selected == g,
+                    dense: true),
               )),
         ],
       ),
@@ -122,8 +366,8 @@ class _GroupDropdown extends StatelessWidget {
   final List<String> groups;
   final String? selected;
   final ValueChanged<String?> onSelect;
-
-  const _GroupDropdown({required this.groups, this.selected, required this.onSelect});
+  const _GroupDropdown(
+      {required this.groups, this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -138,54 +382,6 @@ class _GroupDropdown extends StatelessWidget {
         ],
         onChanged: onSelect,
       ),
-    );
-  }
-}
-
-class _ChannelTile extends StatelessWidget {
-  final Channel channel;
-  final EPGProgram? nowPlaying;
-  final VoidCallback onTap;
-
-  const _ChannelTile({
-    required this.channel,
-    this.nowPlaying,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: channel.logo != null
-          ? CachedNetworkImage(
-              imageUrl: channel.logo!,
-              width: 48,
-              height: 48,
-              fit: BoxFit.contain,
-              errorWidget: (_, __, ___) => const Icon(Icons.tv),
-            )
-          : const Icon(Icons.tv, size: 48),
-      title: Text(channel.name),
-      subtitle: nowPlaying != null
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(nowPlaying!.title,
-                    style: const TextStyle(fontSize: 12),
-                    overflow: TextOverflow.ellipsis),
-                LinearProgressIndicator(
-                  value: nowPlaying!.progress,
-                  backgroundColor: AppTheme.epgPast,
-                  valueColor: const AlwaysStoppedAnimation(AppTheme.accent),
-                  minHeight: 2,
-                ),
-              ],
-            )
-          : null,
-      trailing: channel.hasCatchup
-          ? const Icon(Icons.history, size: 16, color: AppTheme.accent)
-          : null,
-      onTap: onTap,
     );
   }
 }
