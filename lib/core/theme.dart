@@ -42,7 +42,7 @@ class AppTheme {
           ),
           hintStyle: const TextStyle(color: onSurface),
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: surface,
           elevation: 2,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

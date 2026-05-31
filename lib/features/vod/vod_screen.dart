@@ -4,66 +4,110 @@ import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme.dart';
 import '../../data/models/vod_item.dart';
-import '../../data/models/playlist.dart';
-import '../../data/services/xtream_service.dart';
 import '../providers/channel_provider.dart';
 
-final _vodProvider = FutureProvider<List<VodItem>>((ref) async {
-  final playlists = ref.watch(playlistsProvider);
-  final all = <VodItem>[];
-  for (final pl in playlists) {
-    if (pl.type == PlaylistType.xtream) {
-      final svc = XtreamService(pl);
-      try {
-        all.addAll(await svc.getVodStreams());
-      } catch (_) {}
-    }
-  }
-  return all;
-});
-
-class VodScreen extends ConsumerWidget {
+class VodScreen extends ConsumerStatefulWidget {
   const VodScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final vodAsync = ref.watch(_vodProvider);
+  ConsumerState<VodScreen> createState() => _VodScreenState();
+}
 
+class _VodScreenState extends ConsumerState<VodScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Film & Serie')),
-      body: vodAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Errore: $e')),
-        data: (items) {
-          if (items.isEmpty) {
-            return const Center(
-                child: Text(
-                    'Nessun contenuto VOD.\nAssicurati di avere una playlist Xtream Codes.'));
-          }
-          return GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 160,
-              childAspectRatio: 0.65,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final item = items[i];
-              return _VodCard(
-                item: item,
-                onTap: item.streamUrl != null
-                    ? () => context.go('/player', extra: {
-                          'url': item.streamUrl!,
-                          'title': item.name,
-                        })
-                    : null,
-              );
-            },
-          );
-        },
+      appBar: AppBar(
+        title: const Text('Film & Serie'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(icon: Icon(Icons.movie), text: 'Film'),
+            Tab(icon: Icon(Icons.tv), text: 'Serie TV'),
+          ],
+        ),
       ),
+      body: TabBarView(
+        controller: _tabs,
+        children: [
+          _VodGrid(provider: moviesProvider, icon: Icons.movie),
+          _VodGrid(provider: seriesProvider, icon: Icons.live_tv),
+        ],
+      ),
+    );
+  }
+}
+
+class _VodGrid extends ConsumerWidget {
+  final FutureProvider<List<VodItem>> provider;
+  final IconData icon;
+
+  const _VodGrid({required this.provider, required this.icon});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(provider);
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Errore: $e')),
+      data: (items) {
+        if (items.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 64, color: AppTheme.onSurface),
+                const SizedBox(height: 12),
+                const Text(
+                  'Nessun contenuto trovato.\nAggiungi una playlist M3U o Xtream Codes.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
+        }
+        return GridView.builder(
+          padding: const EdgeInsets.all(12),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 160,
+            childAspectRatio: 0.65,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemCount: items.length,
+          itemBuilder: (context, i) {
+            final item = items[i];
+            return _VodCard(
+              item: item,
+              onTap: () {
+                if (item.type == VodType.series) {
+                  context.go('/series', extra: item);
+                } else if (item.streamUrl != null) {
+                  context.go('/player', extra: {
+                    'url': item.streamUrl!,
+                    'title': item.name,
+                  });
+                }
+              },
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -89,7 +133,7 @@ class _VodCard extends StatelessWidget {
                       imageUrl: item.cover!,
                       fit: BoxFit.cover,
                       errorWidget: (_, __, ___) =>
-                          const Icon(Icons.movie, size: 48),
+                          Center(child: Icon(Icons.movie, size: 48)),
                     )
                   : const Center(child: Icon(Icons.movie, size: 48)),
             ),

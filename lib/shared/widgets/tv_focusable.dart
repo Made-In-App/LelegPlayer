@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
 
-/// Widget che aggiunge comportamento focus TV-friendly a qualsiasi child.
-/// Evidenzia il bordo quando ha il focus, gestisce tasto OK/Enter come tap.
+/// Widget con comportamento focus TV-friendly.
+/// Evidenzia il bordo quando ha il focus, gestisce OK/Enter come tap.
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -29,34 +29,31 @@ class TvFocusable extends StatefulWidget {
 }
 
 class _TvFocusableState extends State<TvFocusable> {
-  late final FocusNode _focusNode;
-  bool _hasFocus = false;
+  late final FocusNode _node;
+  bool _focused = false;
 
   @override
   void initState() {
     super.initState();
-    _focusNode = widget.focusNode ?? FocusNode();
-    _focusNode.addListener(_onFocusChange);
+    _node = widget.focusNode ?? FocusNode();
+    _node.addListener(() {
+      if (mounted) setState(() => _focused = _node.hasFocus);
+    });
   }
 
   @override
   void dispose() {
-    if (widget.focusNode == null) _focusNode.dispose();
+    if (widget.focusNode == null) _node.dispose();
     super.dispose();
   }
 
-  void _onFocusChange() {
-    setState(() => _hasFocus = _focusNode.hasFocus);
-  }
-
-  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.select ||
-          event.logicalKey == LogicalKeyboardKey.enter ||
-          event.logicalKey == LogicalKeyboardKey.space) {
-        widget.onTap?.call();
-        return KeyEventResult.handled;
-      }
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.select ||
+            event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.space)) {
+      widget.onTap?.call();
+      return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
   }
@@ -64,12 +61,12 @@ class _TvFocusableState extends State<TvFocusable> {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      focusNode: _focusNode,
+      focusNode: _node,
       autofocus: widget.autofocus,
-      onKeyEvent: _handleKey,
+      onKeyEvent: _onKey,
       child: GestureDetector(
         onTap: () {
-          _focusNode.requestFocus();
+          _node.requestFocus();
           widget.onTap?.call();
         },
         onLongPress: widget.onLongPress,
@@ -77,10 +74,11 @@ class _TvFocusableState extends State<TvFocusable> {
           duration: const Duration(milliseconds: 150),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(widget.borderRadius),
-            border: _hasFocus
-                ? Border.all(color: widget.focusColor, width: 2.5)
-                : Border.all(color: Colors.transparent, width: 2.5),
-            boxShadow: _hasFocus
+            border: Border.all(
+              color: _focused ? widget.focusColor : Colors.transparent,
+              width: 2.5,
+            ),
+            boxShadow: _focused
                 ? [
                     BoxShadow(
                       color: widget.focusColor.withOpacity(0.4),
@@ -93,6 +91,55 @@ class _TvFocusableState extends State<TvFocusable> {
           child: widget.child,
         ),
       ),
+    );
+  }
+}
+
+/// Item di lista con focus TV tracciato via StatefulWidget
+class _TvFocusItem extends StatefulWidget {
+  final Widget Function(BuildContext context, bool hasFocus) builder;
+  final VoidCallback? onSelect;
+
+  const _TvFocusItem({required this.builder, this.onSelect});
+
+  @override
+  State<_TvFocusItem> createState() => _TvFocusItemState();
+}
+
+class _TvFocusItemState extends State<_TvFocusItem> {
+  final _node = FocusNode();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _node.addListener(() {
+      if (mounted) setState(() => _focused = _node.hasFocus);
+    });
+  }
+
+  @override
+  void dispose() {
+    _node.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.select ||
+            event.logicalKey == LogicalKeyboardKey.enter)) {
+      widget.onSelect?.call();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: _node,
+      onKeyEvent: _onKey,
+      child: widget.builder(context, _focused),
     );
   }
 }
@@ -119,21 +166,10 @@ class TvFocusList extends StatelessWidget {
       child: ListView.builder(
         scrollDirection: scrollDirection,
         itemCount: itemCount,
-        itemBuilder: (context, i) {
-          return Focus(
-            onKeyEvent: (node, event) {
-              if (event is KeyDownEvent &&
-                  (event.logicalKey == LogicalKeyboardKey.select ||
-                      event.logicalKey == LogicalKeyboardKey.enter)) {
-                onItemSelected?.call(i);
-                return KeyEventResult.handled;
-              }
-              return KeyEventResult.ignored;
-            },
-            builder: (context, node) =>
-                itemBuilder(context, i, node.hasFocus),
-          );
-        },
+        itemBuilder: (context, i) => _TvFocusItem(
+          onSelect: () => onItemSelected?.call(i),
+          builder: (ctx, focused) => itemBuilder(ctx, i, focused),
+        ),
       ),
     );
   }
@@ -168,21 +204,10 @@ class TvFocusGrid extends StatelessWidget {
           childAspectRatio: 0.65,
         ),
         itemCount: itemCount,
-        itemBuilder: (context, i) {
-          return Focus(
-            onKeyEvent: (node, event) {
-              if (event is KeyDownEvent &&
-                  (event.logicalKey == LogicalKeyboardKey.select ||
-                      event.logicalKey == LogicalKeyboardKey.enter)) {
-                onItemSelected?.call(i);
-                return KeyEventResult.handled;
-              }
-              return KeyEventResult.ignored;
-            },
-            builder: (context, node) =>
-                itemBuilder(context, i, node.hasFocus),
-          );
-        },
+        itemBuilder: (context, i) => _TvFocusItem(
+          onSelect: () => onItemSelected?.call(i),
+          builder: (ctx, focused) => itemBuilder(ctx, i, focused),
+        ),
       ),
     );
   }
