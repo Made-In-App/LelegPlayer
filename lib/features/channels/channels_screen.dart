@@ -20,7 +20,7 @@ class ChannelsScreen extends ConsumerStatefulWidget {
 class _ChannelsScreenState extends ConsumerState<ChannelsScreen>
     with SingleTickerProviderStateMixin {
   String? _selectedGroup;
-  late TabController _tabController;
+  late final TabController _tabController;
 
   @override
   void initState() {
@@ -37,8 +37,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen>
   @override
   Widget build(BuildContext context) {
     final channelsAsync = ref.watch(channelsProvider);
-    final epgAsync = ref.watch(epgSyncProvider);
-    final epg = epgAsync.valueOrNull ?? {};
+    final epg = ref.watch(epgSyncProvider).valueOrNull ?? {};
+    final errorsAsync = ref.watch(loadErrorsProvider);
+    final errors = errorsAsync.valueOrNull ?? [];
 
     return Scaffold(
       appBar: AppBar(
@@ -49,14 +50,6 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen>
             tooltip: 'Aggiorna EPG',
             onPressed: () => ref.read(epgSyncProvider.notifier).refresh(),
           ),
-          if (epgAsync.isLoading)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
-            ),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -67,35 +60,67 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen>
           ],
         ),
       ),
-      body: channelsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => _ErrorView(error: e.toString()),
-        data: (channels) {
-          final groups = channels
-              .map((c) => c.group ?? 'Senza categoria')
-              .toSet()
-              .toList()
-            ..sort();
-
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _AllChannelsTab(
-                channels: channels,
-                groups: groups,
-                selectedGroup: _selectedGroup,
-                onGroupSelected: (g) => setState(() => _selectedGroup = g),
-                epg: epg,
+      body: Column(
+        children: [
+          // Banner errori (solo se ci sono problemi)
+          if (errors.isNotEmpty)
+            Material(
+              color: Colors.orange.shade900,
+              child: ExpansionTile(
+                leading: const Icon(Icons.warning_amber, color: Colors.white),
+                title: Text(
+                  '${errors.length} errore/i di caricamento',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+                children: errors
+                    .map((e) => Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          child: Text(e,
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 11)),
+                        ))
+                    .toList(),
               ),
-              _FavoritesTab(epg: epg),
-              _HistoryTab(epg: epg),
-            ],
-          );
-        },
+            ),
+
+          // Contenuto principale
+          Expanded(
+            child: channelsAsync.when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
+              error: (e, _) => _ErrorView(error: e.toString()),
+              data: (channels) {
+                final groups = channels
+                    .map((c) => c.group ?? 'Senza categoria')
+                    .toSet()
+                    .toList()
+                  ..sort();
+
+                return TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _AllChannelsTab(
+                      channels: channels,
+                      groups: groups,
+                      selectedGroup: _selectedGroup,
+                      onGroupSelected: (g) =>
+                          setState(() => _selectedGroup = g),
+                      epg: epg,
+                    ),
+                    _FavoritesTab(epg: epg),
+                    _HistoryTab(epg: epg),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 }
+
+// ── Tabs ──────────────────────────────────────────────────────
 
 class _AllChannelsTab extends StatelessWidget {
   final List<Channel> channels;
@@ -158,13 +183,20 @@ class _FavoritesTab extends ConsumerWidget {
       error: (e, _) => Center(child: Text('$e')),
       data: (favs) => favs.isEmpty
           ? const Center(
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.favorite_border, size: 64, color: AppTheme.onSurface),
-                SizedBox(height: 12),
-                Text('Nessun preferito'),
-                Text('Tieni premuto su un canale per aggiungerlo',
-                    style: TextStyle(color: AppTheme.onSurface, fontSize: 12)),
-              ]),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.favorite_border,
+                      size: 64, color: AppTheme.onSurface),
+                  SizedBox(height: 12),
+                  Text('Nessun preferito'),
+                  Text(
+                    'Tieni premuto su un canale per aggiungerlo',
+                    style:
+                        TextStyle(color: AppTheme.onSurface, fontSize: 12),
+                  ),
+                ],
+              ),
             )
           : _ChannelList(channels: favs, epg: epg),
     );
@@ -183,11 +215,14 @@ class _HistoryTab extends ConsumerWidget {
       error: (e, _) => Center(child: Text('$e')),
       data: (history) => history.isEmpty
           ? const Center(
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.history, size: 64, color: AppTheme.onSurface),
-                SizedBox(height: 12),
-                Text('Nessun canale visto di recente'),
-              ]),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.history, size: 64, color: AppTheme.onSurface),
+                  SizedBox(height: 12),
+                  Text('Nessun canale visto di recente'),
+                ],
+              ),
             )
           : Column(
               children: [
@@ -206,6 +241,8 @@ class _HistoryTab extends ConsumerWidget {
     );
   }
 }
+
+// ── Lista canali ──────────────────────────────────────────────
 
 class _ChannelList extends ConsumerWidget {
   final List<Channel> channels;
@@ -241,7 +278,7 @@ class _ChannelList extends ConsumerWidget {
   }
 }
 
-class _ChannelTile extends ConsumerWidget {
+class _ChannelTile extends StatelessWidget {
   final Channel channel;
   final EPGProgram? nowPlaying;
   final EPGProgram? nextProgram;
@@ -257,7 +294,7 @@ class _ChannelTile extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return TvFocusable(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -287,8 +324,8 @@ class _ChannelTile extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: Text(channel.name,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600)),
                       ),
                       if (channel.hasCatchup)
                         const Icon(Icons.history,
@@ -328,6 +365,8 @@ class _ChannelTile extends ConsumerWidget {
     );
   }
 }
+
+// ── Sidebar / Dropdown gruppi ─────────────────────────────────
 
 class _GroupSidebar extends StatelessWidget {
   final List<String> groups;
@@ -386,6 +425,8 @@ class _GroupDropdown extends StatelessWidget {
   }
 }
 
+// ── Errore ────────────────────────────────────────────────────
+
 class _ErrorView extends StatelessWidget {
   final String error;
   const _ErrorView({required this.error});
@@ -398,7 +439,7 @@ class _ErrorView extends StatelessWidget {
         children: [
           const Icon(Icons.error_outline, size: 64, color: AppTheme.accent),
           const SizedBox(height: 16),
-          Text(error),
+          Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: () => context.go('/playlists'),

@@ -12,7 +12,7 @@ import '../providers/channel_provider.dart';
 final _seriesInfoProvider =
     FutureProvider.family<Map<String, dynamic>, ({String seriesId, String playlistId})>(
         (ref, args) async {
-  final playlists = ref.watch(playlistsProvider);
+  final playlists = ref.watch(playlistsProvider).valueOrNull ?? [];
   final playlist = playlists.firstWhere((p) => p.id == args.playlistId);
   final svc = XtreamService(playlist);
   return svc.getSeriesInfo(args.seriesId);
@@ -199,7 +199,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
   }
 
   String? _buildEpisodeUrl(Map<String, dynamic> ep) {
-    final playlists = ref.read(playlistsProvider);
+    final playlists = ref.read(playlistsProvider).valueOrNull ?? [];
     if (widget.series.playlistId == null) return null;
     try {
       final playlist = playlists

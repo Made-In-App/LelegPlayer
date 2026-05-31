@@ -4,7 +4,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/theme.dart';
 import '../../data/models/playlist.dart';
-import '../providers/channel_provider.dart';
 
 class PlaylistsScreen extends ConsumerStatefulWidget {
   const PlaylistsScreen({super.key});
@@ -53,8 +52,7 @@ class _PlaylistsScreenState extends ConsumerState<PlaylistsScreen> {
                       value: pl.enabled,
                       onChanged: (v) {
                         pl.enabled = v;
-                        pl.save();
-                        ref.invalidate(channelsProvider);
+                        pl.save(); // Hive notifica → StreamProvider si aggiorna
                       },
                     ),
                     IconButton(
@@ -88,8 +86,7 @@ class _PlaylistsScreenState extends ConsumerState<PlaylistsScreen> {
               child: const Text('Annulla')),
           TextButton(
             onPressed: () {
-              pl.delete();
-              ref.invalidate(channelsProvider);
+              pl.delete(); // Hive notifica → StreamProvider si aggiorna
               Navigator.pop(context);
             },
             child: const Text('Elimina',
@@ -107,13 +104,14 @@ class _PlaylistsScreenState extends ConsumerState<PlaylistsScreen> {
       builder: (_) => _AddPlaylistSheet(
         onSave: (pl) {
           final box = Hive.box<PlaylistSource>('playlists');
-          box.add(pl);
-          ref.invalidate(channelsProvider);
+          box.add(pl); // Hive notifica → StreamProvider si aggiorna
         },
       ),
     );
   }
 }
+
+// ── Form aggiunta playlist ────────────────────────────────────
 
 class _AddPlaylistSheet extends StatefulWidget {
   final Function(PlaylistSource) onSave;
@@ -132,6 +130,17 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _epgCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _m3uUrlCtrl.dispose();
+    _serverCtrl.dispose();
+    _userCtrl.dispose();
+    _passCtrl.dispose();
+    _epgCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -153,23 +162,23 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 16),
 
-              // Tipo
               SegmentedButton<PlaylistType>(
                 segments: const [
                   ButtonSegment(
                       value: PlaylistType.m3u, label: Text('M3U/M3U8')),
                   ButtonSegment(
-                      value: PlaylistType.xtream, label: Text('Xtream Codes')),
+                      value: PlaylistType.xtream,
+                      label: Text('Xtream Codes')),
                 ],
                 selected: {_type},
-                onSelectionChanged: (s) =>
-                    setState(() => _type = s.first),
+                onSelectionChanged: (s) => setState(() => _type = s.first),
               ),
               const SizedBox(height: 16),
 
               TextFormField(
                 controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nome playlist'),
+                decoration:
+                    const InputDecoration(labelText: 'Nome playlist'),
                 validator: (v) =>
                     v?.isEmpty == true ? 'Inserisci un nome' : null,
               ),
@@ -181,8 +190,9 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
                   decoration:
                       const InputDecoration(labelText: 'URL M3U/M3U8'),
                   keyboardType: TextInputType.url,
+                  autocorrect: false,
                   validator: (v) =>
-                      v?.isEmpty == true ? 'Inserisci l\'URL' : null,
+                      v?.isEmpty == true ? "Inserisci l'URL" : null,
                 ),
               ] else ...[
                 TextFormField(
@@ -190,20 +200,24 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
                   decoration: const InputDecoration(
                       labelText: 'Server URL (es: http://server:8080)'),
                   keyboardType: TextInputType.url,
+                  autocorrect: false,
                   validator: (v) =>
                       v?.isEmpty == true ? 'Inserisci il server' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _userCtrl,
-                  decoration: const InputDecoration(labelText: 'Username'),
+                  decoration:
+                      const InputDecoration(labelText: 'Username'),
+                  autocorrect: false,
                   validator: (v) =>
-                      v?.isEmpty == true ? 'Inserisci l\'username' : null,
+                      v?.isEmpty == true ? "Inserisci l'username" : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _passCtrl,
-                  decoration: const InputDecoration(labelText: 'Password'),
+                  decoration:
+                      const InputDecoration(labelText: 'Password'),
                   obscureText: true,
                   validator: (v) =>
                       v?.isEmpty == true ? 'Inserisci la password' : null,
@@ -215,6 +229,7 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
                 decoration: const InputDecoration(
                     labelText: 'URL EPG XMLTV (opzionale)'),
                 keyboardType: TextInputType.url,
+                autocorrect: false,
               ),
               const SizedBox(height: 24),
 
@@ -236,7 +251,8 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
       ..id = const Uuid().v4()
       ..name = _nameCtrl.text.trim()
       ..type = _type
-      ..m3uUrl = _type == PlaylistType.m3u ? _m3uUrlCtrl.text.trim() : null
+      ..m3uUrl =
+          _type == PlaylistType.m3u ? _m3uUrlCtrl.text.trim() : null
       ..serverUrl =
           _type == PlaylistType.xtream ? _serverCtrl.text.trim() : null
       ..username =
@@ -252,6 +268,8 @@ class _AddPlaylistSheetState extends State<_AddPlaylistSheet> {
   }
 }
 
+// ── Stato vuoto ───────────────────────────────────────────────
+
 class _EmptyState extends StatelessWidget {
   final VoidCallback onAdd;
   const _EmptyState({required this.onAdd});
@@ -262,7 +280,8 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.playlist_add, size: 80, color: AppTheme.onSurface),
+          const Icon(Icons.playlist_add,
+              size: 80, color: AppTheme.onSurface),
           const SizedBox(height: 16),
           const Text('Nessuna playlist aggiunta',
               style: TextStyle(fontSize: 18)),
